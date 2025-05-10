@@ -1,0 +1,620 @@
+
+
+
+---
+
+
+- フォルダ名: .
+- ファイル名: 01_powershell7_install.ps1
+- 内容:
+﻿# スクリプトの実行には管理者権限が必要な場合があります。
+
+# --- PowerShell 7 のインストール状況を確認 ---
+Write-Host "PowerShell 7 のインストール状況を確認しています..."
+$pwshPath = Get-Command pwsh -ErrorAction SilentlyContinue
+
+if ($pwshPath) {
+    $pwshVersion = (pwsh -Command "$PSVersionTable.PSVersion").ToString()
+    Write-Host "PowerShell 7 (またはそれ以降) が既にインストールされています。" -ForegroundColor Green
+    Write-Host "バージョン: $pwshVersion"
+    Write-Host "パス: $($pwshPath.Source)"
+    pwsh
+} else {
+    Write-Warning "PowerShell 7 はインストールされていないようです。"
+    Write-Host "Winget を使用して PowerShell 7 (安定版) のインストールを試みます..."
+    Write-Host "この処理には管理者権限が必要な場合があります。"
+
+    # Wingetが利用可能か確認
+    $wingetPath = Get-Command winget -ErrorAction SilentlyContinue
+    if (-not $wingetPath) {
+        Write-Error "Winget コマンドが見つかりません。PowerShell 7 を手動でインストールしてください。"
+        Write-Host "手動インストールの情報: https://learn.microsoft.com/ja-jp/powershell/scripting/install/installing-powershell-on-windows"
+        exit 1
+    }
+
+    # 現在のユーザーが管理者権限を持っているか簡易的に確認
+    $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+    if (-not $isAdmin) {
+        Write-Warning "スクリプトが管理者権限で実行されていません。"
+        Write-Warning "PowerShell 7 のインストールには管理者権限が必要です。"
+        $choice = Read-Host "現在のセッションを管理者として再起動してインストールを試みますか？ (y/n)"
+        if ($choice -eq 'y') {
+            Start-Process pwsh -Verb RunAs -ArgumentList "-NoProfile -File `"$($MyInvocation.MyCommand.Path)`""
+            exit
+        } else {
+            Write-Host "インストールを中止しました。手動でインストールするか、管理者としてスクリプトを再実行してください。"
+            exit 1
+        }
+    }
+
+    # Wingetを使ってPowerShell (安定版) をインストール
+    # "--accept-source-agreements" と "--accept-package-agreements" で一部のプロンプトをスキップできる場合がある
+    $InstallCommand = "winget install --id Microsoft.PowerShell --source winget --accept-source-agreements --accept-package-agreements -h" # -h でサイレントインストールを試みる
+
+    Write-Host "以下のコマンドでインストールを実行します: $InstallCommand"
+    Write-Host "インストールには数分かかることがあります。プロンプトが表示された場合は指示に従ってください。"
+
+    try {
+        Invoke-Expression -Command $InstallCommand -ErrorAction Stop
+        Write-Host "PowerShell 7 のインストールコマンドが実行されました。" -ForegroundColor Green
+        Write-Host "インストールが成功したか確認してください。"
+        Write-Host "新しいPowerShell 7のウィンドウを開くには 'pwsh' と入力するか、スタートメニューから検索してください。"
+
+        # インストール後の確認 (パスが通るのに時間がかかる場合がある)
+        Write-Host "インストール後の確認を試みます..."
+        Start-Sleep -Seconds 10 # パスが反映されるのを待つ
+        $pwshPathAfterInstall = Get-Command pwsh -ErrorAction SilentlyContinue
+        if ($pwshPathAfterInstall) {
+            $pwshVersionAfterInstall = (pwsh -Command "$PSVersionTable.PSVersion").ToString()
+            Write-Host "PowerShell 7 が正常にインストールされたようです。" -ForegroundColor Green
+            Write-Host "バージョン: $pwshVersionAfterInstall"
+            Write-Host "パス: $($pwshPathAfterInstall.Source)"
+        } else {
+            Write-Warning "PowerShell 7 のインストール確認に失敗しました。手動で確認してください。"
+            Write-Warning "PCの再起動が必要な場合や、パスが反映されるのにもう少し時間がかかる場合があります。"
+        }
+
+    } catch {
+        Write-Error "PowerShell 7 のインストール中にエラーが発生しました: $($_.Exception.Message)"
+        if ($_.Exception.ErrorRecord) {
+            Write-Error ($_.Exception.ErrorRecord | Format-List * -Force | Out-String)
+        }
+        Write-Host "手動でのインストールを検討してください: https://learn.microsoft.com/ja-jp/powershell/scripting/install/installing-powershell-on-windows"
+    }
+}
+
+Write-Host ""
+Write-Host "スクリプトの処理が完了しました。"
+
+
+---
+
+
+- フォルダ名: .
+- ファイル名: 02_m4a_13_split.ps1
+- 内容:
+﻿$IntermediateFile = "out_1.3x.m4a" # ffmpegスクリプトで使用する中間ファイル名に合わせてください
+
+# --- 中間ファイルが存在すれば削除 ---
+if (Test-Path $IntermediateFile) {
+    Write-Host "ファイル「$IntermediateFile」を削除します..."
+    try {
+        Remove-Item -Path $IntermediateFile -Force -ErrorAction Stop
+        Write-Host "ファイル「$IntermediateFile」を削除しました。"
+    } catch {
+        Write-Warning "ファイル「$IntermediateFile」の削除に失敗しました: $($_.Exception.Message)"
+        # ここでスクリプトを停止するか、続行するかは要件によります
+    }
+    Write-Host ""
+}
+
+$FilePatternToDelete = "output_???.m4a" # "?" は任意の1文字にマッチ。数字3桁にマッチさせる。
+                                       # または "output_*.m4a" でも可 (output_で始まる全てのm4a)
+
+# --- ファイルが存在するディレクトリ (スクリプトと同じ場所を想定) ---
+$TargetDirectory = ".\" # カレントディレクトリ
+# もし特定のディレクトリを指定する場合はフルパスで:
+# $TargetDirectory = "C:\path\to\your\audio_files"
+
+Write-Host "ディレクトリ「$((Resolve-Path $TargetDirectory).Path)」内のパターン「$FilePatternToDelete」に一致するファイルを検索・削除します..."
+
+# パターンに一致するファイルを取得
+$FilesToDelete = Get-ChildItem -Path $TargetDirectory -Filter $FilePatternToDelete -File # -File でファイルのみを対象
+
+if ($FilesToDelete.Count -gt 0) {
+    Write-Host "$($FilesToDelete.Count) 個の対象ファイルが見つかりました。"
+    foreach ($File in $FilesToDelete) {
+        $FilePath = $File.FullName
+        Write-Host "  削除中: $FilePath"
+        try {
+            Remove-Item -Path $FilePath -Force -ErrorAction Stop
+            Write-Host "    削除成功: $FilePath" -ForegroundColor Green
+        } catch {
+            Write-Error "    削除失敗: $FilePath - エラー: $($_.Exception.Message)"
+        }
+    }
+    Write-Host "指定されたパターンのファイルの削除処理が完了しました。"
+} else {
+    Write-Host "パターン「$FilePatternToDelete」に一致するファイルは見つかりませんでした。"
+}
+
+Write-Host ""
+Write-Host ""
+
+# --- コマンド1: 1.3倍速にする ---
+Write-Host "Geminiが間違わない程度に早くして、ファイルサイズを小さくする。"
+Write-Host "コマンド1: input.m4a を1.3倍速にして out_1.3x.m4a に保存します..."
+ffmpeg -i input.m4a -filter:a "atempo=1.3" -vn out_1.3x.m4a
+
+Write-Host "コマンド1 完了。"
+Write-Host "" # 改行
+
+# --- コマンド2: 分割する ---
+Write-Host "Gemini文字起こしが、７分ではエラー　６分ならOKだが、余裕を見て４分(240秒)に分割する"
+Write-Host "コマンド2: out_1.3x.m4a を5分(300秒)ごとに output_%03d.m4a のパターンで分割します..."
+ffmpeg -i out_1.3x.m4a -f segment -segment_time 240 -c copy output_%03d.m4a
+
+Write-Host "コマンド2 完了。"
+Write-Host ""
+
+Write-Host "全てのffmpeg処理が完了しました。"
+
+
+---
+
+
+- フォルダ名: .
+- ファイル名: 03_dify_mojiokosi2.ps1
+- 内容:
+﻿# Ensure output encoding is UTF-8, can be helpful
+# $OutputEncoding = [System.Text.Encoding]::UTF8
+
+# --- Dify API Settings (★ Replace with your actual values) ---
+$DifyApiBaseUrl = "https://api.dify.ai/v1" # Base URL of your Dify instance
+$DifyFileUploadEndpoint = "$DifyApiBaseUrl/files/upload"
+$DifyWorkflowRunEndpoint = "$DifyApiBaseUrl/workflows/run" # Workflow endpoint
+$DifyApiKey = "app-eAx08D3rouMzJKNBKfFZGupk" # ★ Your Dify App API Key
+$UserIdentifier = "powershell_user_$(Get-Random)" # Unique user ID for each run (optional)
+
+# --- Dify Workflow Variable Names (★ As per your Dify setup) ---
+$DifyWorkflowAudioInputVariable = "input"    # Variable name for audio file input in workflow
+$DifyWorkflowOutputVariable = "text"      # Variable name for transcription output in workflow
+
+# --- Retry Settings for Workflow Execution ---
+$MaxRetriesWorkflow = 1       # Max number of retries (total attempts = 1 + MaxRetries)
+$RetrySleepSecondsWorkflow = 5 # Seconds to wait before retrying
+
+# --- Target File Pattern and Location (★ Modify as needed) ---
+$FilePattern = "output_*.m4a"
+$AudioFilesDirectory = ".\" # If in the same directory as the script. Use full path otherwise (e.g., "C:\path\to\audio_files")
+
+# --- Script Output Directory ---
+$OutputDirectory = ".\dify_transcripts_workflow" # Directory to save results
+
+# ★★★ ここから追加 ★★★
+# Check if the output directory exists and delete it recursively if it does
+if (Test-Path $OutputDirectory) {
+    Write-Host "既存の出力ディレクトリ「$OutputDirectory」が見つかりました。中身ごと削除します..."
+    try {
+        Remove-Item -Path $OutputDirectory -Recurse -Force -ErrorAction Stop
+        Write-Host "ディレクトリ「$OutputDirectory」を正常に削除しました。" -ForegroundColor Green
+    } catch {
+        Write-Error "ディレクトリ「$OutputDirectory」の削除中にエラーが発生しました: $($_.Exception.Message)"
+        # エラーが発生した場合、スクリプトを続行するか停止するかを決定
+        # ここでは続行するが、場合によっては exit 1 などで停止することも検討
+        Write-Warning "ディレクトリ削除に失敗しましたが、処理を続行します。"
+    }
+    Write-Host ""
+}
+# ★★★ ここまで追加 ★★★
+
+if (-not (Test-Path $OutputDirectory)) {
+    New-Item -ItemType Directory -Path $OutputDirectory | Out-Null
+}
+
+# --- Headers ---
+$FileUploadAuthHeader = @{ # For Step A
+    "Authorization" = "Bearer $DifyApiKey"
+}
+$WorkflowRunHeaders = @{ # For Step B, Content-Type is application/json
+    "Authorization" = "Bearer $DifyApiKey"
+    "Content-Type"  = "application/json"
+}
+
+# --- Find Target Files ---
+$AudioFiles = Get-ChildItem -Path $AudioFilesDirectory -Filter $FilePattern
+
+if ($AudioFiles.Count -eq 0) {
+    Write-Warning "No target files found: $AudioFilesDirectory\$FilePattern"
+    exit
+}
+
+Write-Host "Starting to send files to Dify Workflow API for transcription..."
+Write-Host ""
+
+foreach ($AudioFile in $AudioFiles) {
+    $CurrentAudioFilePath = $AudioFile.FullName
+    $FileNameNoExt = $AudioFile.BaseName # Filename without extension
+
+    Write-Host "--------------------------------------------------"
+    Write-Host "Processing file: $CurrentAudioFilePath"
+
+    # --- Step A: File Upload (Using Invoke-WebRequest for MIME type control) ---
+    Write-Host "  Step A: Uploading file '$($AudioFile.Name)' with Invoke-WebRequest..."
+    $UploadResponsePath = Join-Path -Path $OutputDirectory -ChildPath "upload_response_$FileNameNoExt.json"
+    $UploadFileId = $null
+
+    try {
+        # ... (ファイルアップロードのコードは変更なし - 前回のバージョンを使用) ...
+        $FileBytes = [System.IO.File]::ReadAllBytes($CurrentAudioFilePath)
+        $FileName = $AudioFile.Name
+        $Boundary = "---------------------------$([System.Guid]::NewGuid().ToString())"
+        $CRLF = "`r`n"
+        $BodyLines = @(
+            "--$Boundary",
+            "Content-Disposition: form-data; name=`"user`"$CRLF",
+            $UserIdentifier,
+            "--$Boundary",
+            "Content-Disposition: form-data; name=`"file`"; filename=`"$FileName`"",
+            "Content-Type: audio/m4a$CRLF"
+        )
+        $BodyPrefixString = ($BodyLines -join $CRLF) + $CRLF
+        $BodySuffixString = "$CRLF--$Boundary--$CRLF"
+        $PrefixBytes = [System.Text.Encoding]::UTF8.GetBytes($BodyPrefixString)
+        $SuffixBytes = [System.Text.Encoding]::UTF8.GetBytes($BodySuffixString)
+        $FullRequestBodyBytes = New-Object byte[] ($PrefixBytes.Length + $FileBytes.Length + $SuffixBytes.Length)
+        [System.Array]::Copy($PrefixBytes, 0, $FullRequestBodyBytes, 0, $PrefixBytes.Length)
+        [System.Array]::Copy($FileBytes, 0, $FullRequestBodyBytes, $PrefixBytes.Length, $FileBytes.Length)
+        [System.Array]::Copy($SuffixBytes, 0, $FullRequestBodyBytes, ($PrefixBytes.Length + $FileBytes.Length), $SuffixBytes.Length)
+        $UploadContentType = "multipart/form-data; boundary=`"$Boundary`""
+        $RawUploadResponse = Invoke-WebRequest -Uri $DifyFileUploadEndpoint -Method Post -Headers $FileUploadAuthHeader -Body $FullRequestBodyBytes -ContentType $UploadContentType -UseBasicParsing -SkipHttpErrorCheck
+        if ($RawUploadResponse.StatusCode -ge 400) {
+            Write-Error "  Error: File upload failed with status code $($RawUploadResponse.StatusCode)."
+            $ErrorBody = $RawUploadResponse.Content
+            Write-Warning "    Error response body (Upload): $ErrorBody"
+            $ErrorBody | Out-File -FilePath $UploadResponsePath -Encoding UTF8
+            Continue
+        }
+        $UploadResponse = $RawUploadResponse.Content | ConvertFrom-Json
+        $UploadResponse | ConvertTo-Json -Depth 5 | Out-File -FilePath $UploadResponsePath -Encoding UTF8
+        $UploadFileId = $UploadResponse.id
+        if (-not $UploadFileId) {
+            Write-Error "  Error: Failed to get upload_file_id. Check response: $UploadResponsePath"
+            Continue
+        }
+        Write-Host "    Upload successful. upload_file_id: $UploadFileId, Sent MIME Type for file: audio/m4a"
+    } catch {
+        Write-Error "  Error: Unexpected exception during file upload: $($_.Exception.Message)"
+        Continue
+    }
+
+    # --- Step B: Run Workflow (Transcription Request) with Retry Logic ---
+    Write-Host "  Step B: Running workflow (upload_file_id: $UploadFileId)..."
+    $WorkflowPayloadPath = Join-Path -Path $OutputDirectory -ChildPath "workflow_payload_$FileNameNoExt.json"
+    $WorkflowResponsePath = Join-Path -Path $OutputDirectory -ChildPath "workflow_response_$FileNameNoExt.json"
+
+    $PayloadInputs = @{
+        "$DifyWorkflowAudioInputVariable" = @{
+            type             = "audio"
+            transfer_method  = "local_file"
+            upload_file_id   = $UploadFileId
+        }
+    }
+    $WorkflowPayload = @{
+        inputs         = $PayloadInputs
+        response_mode  = "blocking"
+        user           = $UserIdentifier
+    }
+    $WorkflowPayloadJson = $WorkflowPayload | ConvertTo-Json -Depth 5
+    $WorkflowPayloadJson | Out-File -FilePath $WorkflowPayloadPath -Encoding UTF8
+
+    $RetryCountWorkflow = 0
+    $WorkflowSucceeded = $false
+
+    while ($RetryCountWorkflow -le $MaxRetriesWorkflow -and -not $WorkflowSucceeded) {
+        if ($RetryCountWorkflow -gt 0) {
+            Write-Warning "    Retrying workflow execution ($($RetryCountWorkflow)/$($MaxRetriesWorkflow)). Waiting $($RetrySleepSecondsWorkflow) seconds..."
+            Start-Sleep -Seconds $RetrySleepSecondsWorkflow
+        }
+        Write-Host "    Attempting API call (Attempt $($RetryCountWorkflow + 1))..."
+        try {
+            $RawWorkflowResponse = Invoke-RestMethod -Uri $DifyWorkflowRunEndpoint -Method Post -Headers $WorkflowRunHeaders -Body $WorkflowPayloadJson -SkipHttpErrorCheck
+
+            # Check for Dify's specific error structure OR if it's a non-successful workflow status
+            if ($RawWorkflowResponse.code -and ($RawWorkflowResponse.status -ge 400)) { # Direct API error (e.g., 400, 500, 504)
+                Write-Error "    Error: Workflow execution failed (Dify error code: $($RawWorkflowResponse.code) - Status: $($RawWorkflowResponse.status)). Message: $($RawWorkflowResponse.message)"
+                $ErrorBodyJson = $RawWorkflowResponse | ConvertTo-Json -Depth 10
+                Write-Warning "      Error response body (Workflow): $ErrorBodyJson"
+                $ErrorBodyJson | Out-File -FilePath $WorkflowResponsePath -Encoding UTF8 # Overwrite with last error
+                if ($RawWorkflowResponse.status -lt 500) { # For 4xx errors, retrying might not help
+                    Write-Warning "      Client-side error ($($RawWorkflowResponse.status)), not retrying."
+                    break # Exit retry loop
+                }
+            } elseif ($RawWorkflowResponse.data -and $RawWorkflowResponse.data.status -and $RawWorkflowResponse.data.status -ne 'succeeded') { # Workflow executed but failed internally
+                Write-Error "    Error: Workflow execution indicated failure (status: $($RawWorkflowResponse.data.status)). Error: $($RawWorkflowResponse.data.error)"
+                $ErrorBodyJson = $RawWorkflowResponse | ConvertTo-Json -Depth 10
+                Write-Warning "      Dify response (Workflow): $ErrorBodyJson"
+                $ErrorBodyJson | Out-File -FilePath $WorkflowResponsePath -Encoding UTF8 # Overwrite
+                if ($RawWorkflowResponse.data.status -eq 'failed') { # Definite failure
+                     Write-Warning "      Workflow status 'failed', not retrying."
+                     break # Exit retry loop
+                }
+            } else { # Potentially successful or unexpected good response
+                $RawWorkflowResponse | ConvertTo-Json -Depth 10 | Out-File -FilePath $WorkflowResponsePath -Encoding UTF8
+                Write-Host "    Workflow API call potentially successful. Response saved to $WorkflowResponsePath"
+
+                if ($RawWorkflowResponse.data -and $RawWorkflowResponse.data.outputs -and $RawWorkflowResponse.data.outputs.$DifyWorkflowOutputVariable -ne $null) {
+                    $Transcription = $RawWorkflowResponse.data.outputs.$DifyWorkflowOutputVariable
+                    Write-Host "    --- Transcription Result ---"
+                    Write-Host $Transcription
+                    $WorkflowSucceeded = $true # Set success flag
+                } else {
+                    Write-Warning "    Could not find transcription in response: data.outputs.$DifyWorkflowOutputVariable"
+                    Write-Warning "    Check $WorkflowResponsePath for the full response structure."
+                    # Consider if this specific case should be retried or marked as failure.
+                    # For now, it will retry if $WorkflowSucceeded is not set.
+                }
+            }
+        } catch {
+            Write-Error "    Error: Unexpected exception during workflow execution (Attempt $($RetryCountWorkflow + 1)): $($_.Exception.Message)"
+            # This catch is for network errors etc., before a Dify JSON response is received.
+        }
+
+        if (-not $WorkflowSucceeded -and $RetryCountWorkflow -lt $MaxRetriesWorkflow) {
+            Write-Host "    Workflow attempt failed. Will retry if applicable."
+        }
+        $RetryCountWorkflow++
+    } # End of while loop
+
+    if (-not $WorkflowSucceeded) {
+        Write-Error "  Step B: Workflow execution ultimately failed for file '$($AudioFile.Name)' after $($MaxRetriesWorkflow + 1) attempts."
+    }
+    Write-Host ""
+} # End of foreach loop
+
+
+# --- 全ての文字起こし結果を1つのテキストファイルにまとめる ---
+# ... (この部分のコードは変更なし - 前回のバージョンを使用) ...
+$CombinedTranscriptionFile = Join-Path -Path $OutputDirectory -ChildPath "all_transcriptions.txt"
+Write-Host "--------------------------------------------------"
+Write-Host "全ての文字起こし結果を $CombinedTranscriptionFile にまとめています..."
+if (Test-Path $CombinedTranscriptionFile) {
+    Remove-Item $CombinedTranscriptionFile
+}
+Get-ChildItem -Path $OutputDirectory -Filter "workflow_response_*.json" | ForEach-Object {
+    $ResponseFilePath = $_.FullName
+    $OriginalFileName = $_.BaseName -replace "workflow_response_", ""
+    Write-Host "  処理中: $ResponseFilePath (元ファイル: $OriginalFileName.m4a)"
+    try {
+        $JsonResponse = Get-Content -Path $ResponseFilePath -Raw | ConvertFrom-Json -ErrorAction Stop
+        if ($JsonResponse.data -and $JsonResponse.data.outputs -and $JsonResponse.data.outputs.$DifyWorkflowOutputVariable -ne $null) {
+            $TranscriptionText = $JsonResponse.data.outputs.$DifyWorkflowOutputVariable
+            #Add-Content -Path $CombinedTranscriptionFile -Value "--- Transcription for: $OriginalFileName.m4a ---"
+            Add-Content -Path $CombinedTranscriptionFile -Value $TranscriptionText
+            Add-Content -Path $CombinedTranscriptionFile -Value ""
+            Add-Content -Path $CombinedTranscriptionFile -Value ""
+        } elseif ($JsonResponse.code -and $JsonResponse.message) {
+            Add-Content -Path $CombinedTranscriptionFile -Value "--- Error for: $OriginalFileName.m4a ---"
+            Add-Content -Path $CombinedTranscriptionFile -Value "Error Code: $($JsonResponse.code)"
+            Add-Content -Path $CombinedTranscriptionFile -Value "Error Message: $($JsonResponse.message)"
+            Add-Content -Path $CombinedTranscriptionFile -Value ""
+            Add-Content -Path $CombinedTranscriptionFile -Value "--------------------------------------------------"
+            Add-Content -Path $CombinedTranscriptionFile -Value ""
+        } else {
+            Write-Warning "    $ResponseFilePath から文字起こし結果を抽出できませんでした。内容は成功したレスポンス形式ではありません。"
+            Add-Content -Path $CombinedTranscriptionFile -Value "--- No valid transcription found for: $OriginalFileName.m4a ---"
+            Add-Content -Path $CombinedTranscriptionFile -Value ""
+            Add-Content -Path $CombinedTranscriptionFile -Value "--------------------------------------------------"
+            Add-Content -Path $CombinedTranscriptionFile -Value ""
+        }
+    } catch {
+        Write-Warning "    $ResponseFilePath の読み込みまたはJSONパースに失敗しました: $($_.Exception.Message)"
+        Add-Content -Path $CombinedTranscriptionFile -Value "--- Failed to process: $OriginalFileName.m4a (Error reading or parsing JSON) ---"
+        Add-Content -Path $CombinedTranscriptionFile -Value ""
+        Add-Content -Path $CombinedTranscriptionFile -Value "--------------------------------------------------"
+        Add-Content -Path $CombinedTranscriptionFile -Value ""
+    }
+}
+if (Test-Path $CombinedTranscriptionFile) {
+    Write-Host "文字起こし結果が $CombinedTranscriptionFile に保存されました。"
+} else {
+    Write-Warning "$CombinedTranscriptionFile は作成されませんでした。処理対象のレスポンスファイルがなかったか、エラーが発生しました。"
+}
+Write-Host "--------------------------------------------------"
+Write-Host "All processing complete."
+
+
+---
+
+
+- フォルダ名: .
+- ファイル名: [本番]文字起こし20250510.yml
+- 内容:
+app:
+  description: ''
+  icon: 🤖
+  icon_background: '#FFEAD5'
+  mode: workflow
+  name: '[本番]文字起こし20250510'
+  use_icon_as_answer_icon: false
+dependencies:
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/gemini:0.1.5@012c9e0467a11910db974e0436348e93a376fdc96381946a3db2c56708377381
+kind: app
+version: 0.2.0
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload:
+      allowed_file_extensions:
+      - .JPG
+      - .JPEG
+      - .PNG
+      - .GIF
+      - .WEBP
+      - .SVG
+      allowed_file_types:
+      - image
+      allowed_file_upload_methods:
+      - local_file
+      - remote_url
+      enabled: false
+      fileUploadConfig:
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        image_file_size_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+      number_limits: 3
+    opening_statement: ''
+    retriever_resource:
+      enabled: true
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: llm
+      id: 1746846958118-source-1746846961452-target
+      source: '1746846958118'
+      sourceHandle: source
+      target: '1746846961452'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: llm
+        targetType: end
+      id: 1746846961452-source-1746847044403-target
+      source: '1746846961452'
+      sourceHandle: source
+      target: '1746847044403'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        desc: ''
+        selected: false
+        title: 開始
+        type: start
+        variables:
+        - allowed_file_extensions: []
+          allowed_file_types:
+          - audio
+          allowed_file_upload_methods:
+          - local_file
+          - remote_url
+          label: input
+          max_length: 48
+          options: []
+          required: true
+          type: file
+          variable: input
+      height: 89
+      id: '1746846958118'
+      position:
+        x: 80
+        y: 282
+      positionAbsolute:
+        x: 80
+        y: 282
+      selected: true
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: ''
+        model:
+          completion_params:
+            temperature: 0.7
+          mode: chat
+          name: gemini-2.0-flash-exp
+          provider: langgenius/gemini/google
+        prompt_template:
+        - id: 1c2939d3-7366-40fd-9ee0-b46a158d0fc2
+          role: system
+          text: ビジョンに格納された音声ファイルを文字起こししてください
+        - id: 24012c5f-067f-45ab-ba82-515c55fce8a2
+          role: user
+          text: ビジョンに格納された音声ファイルを文字起こししてください
+        selected: false
+        title: LLM
+        type: llm
+        variables: []
+        vision:
+          configs:
+            detail: high
+            variable_selector:
+            - '1746846958118'
+            - input
+          enabled: true
+      height: 89
+      id: '1746846961452'
+      position:
+        x: 384
+        y: 282
+      positionAbsolute:
+        x: 384
+        y: 282
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        outputs:
+        - value_selector:
+          - '1746846961452'
+          - text
+          variable: text
+        selected: false
+        title: 終了
+        type: end
+      height: 89
+      id: '1746847044403'
+      position:
+        x: 688
+        y: 282
+      positionAbsolute:
+        x: 688
+        y: 282
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    viewport:
+      x: -29
+      y: -43
+      zoom: 1
