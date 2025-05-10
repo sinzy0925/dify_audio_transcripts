@@ -1,11 +1,11 @@
 **実行手順　簡易版:**
-### できること：input.m4aファイルを文字起こしする。
-### Geminiを使って文字起こしします。
-### Geminiの文字起こしは４分程度づつにしないと失敗します。
-### 02_m4a_13_split.ps1を使って、４分づつに分割します。
-### 03_dify_mojiokosi2.ps1を使って、文字起こしを実施し、
-### 文字起こし結果をすべてを dify_transcripts_workflow\all_transcriptions.txt 
-### に出力します。
+- できること：input.m4aファイルを文字起こしする。
+- Geminiを使って文字起こしします。
+- Geminiの文字起こしは４分程度づつにしないと失敗します。
+- 02_m4a_13_split.ps1を使って、４分づつに分割します。
+- 03_dify_mojiokosi2.ps1を使って、文字起こしを実施し、
+- 文字起こし結果をすべてを dify_transcripts_workflow\all_transcriptions.txt 
+- に出力します。
 
 1.  （初回）`01_powershell7_install.ps1` を管理者として実行し、PowerShell 7を準備。
 2.  処理したいM4Aファイルを `input.m4a` として用意。
@@ -13,7 +13,8 @@
 4.  PowerShell 7 (`pwsh`) で `03_dify_mojiokosi2.ps1` を実行。
 5.  `dify_transcripts_workflow\all_transcriptions.txt` に結果が出力されるのを確認。
 
-
+-
+-
 **このアプリ（DifyワークフローとPowerShellスクリプト）の目的:**
 
 ローカルにある複数のM4A音声ファイル（例: `output_000.m4a`, `output_001.m4a`...）を、Difyで作成した文字起こしワークフローを使って順番に処理し、その結果（文字起こしされたテキスト）を1つのテキストファイルにまとめることです。
