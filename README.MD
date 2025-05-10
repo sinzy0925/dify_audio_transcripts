@@ -1,9 +1,11 @@
 **実行手順　簡易版:**
-## できること：input.m4aファイルを文字起こしする。
-## Geminiを使って文字起こしします。文字起こしは４分程度づつにしないと上手く行かないので、
-## 02_m4a_13_split.ps1を使って、４分づつに分割します。
-## 03_dify_mojiokosi2.ps1を使って、文字起こしを実施し、dify_transcripts_workflow\all_transcriptions.txt
-## に出力します。
+### できること：input.m4aファイルを文字起こしする。
+### Geminiを使って文字起こしします。
+### Geminiの文字起こしは４分程度づつにしないと失敗します。
+### 02_m4a_13_split.ps1を使って、４分づつに分割します。
+### 03_dify_mojiokosi2.ps1を使って、文字起こしを実施し、
+### 文字起こし結果をすべてを dify_transcripts_workflow\all_transcriptions.txt 
+### に出力します。
 
 1.  （初回）`01_powershell7_install.ps1` を管理者として実行し、PowerShell 7を準備。
 2.  処理したいM4Aファイルを `input.m4a` として用意。
